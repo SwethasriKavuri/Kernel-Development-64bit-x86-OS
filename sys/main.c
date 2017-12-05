@@ -107,7 +107,11 @@ void boot(void)
   );
   init_gdt(); 
   idt_install();
-  //syscall_init();  
+
+/*testing*/
+	char* str = "Himalaya";
+                 syscall_3((uint64_t)1,(uint64_t)1 ,(uint64_t) str,(uint64_t)6);	  
+//syscall_init();  
   //setting MSR value
  // pci_probe();
   __asm__ volatile( "sti");	
