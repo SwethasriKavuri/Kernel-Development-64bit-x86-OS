@@ -1,6 +1,6 @@
 #ifndef _AHCI_H
 #define _AHCI_H
-
+#include <sys/defs.h>
 #define HBA_GHC_AE     (1U << 31)
 #define HBA_GHC_IE     (1U << 1)
 #define HBA_GHC_HR     (1U)
@@ -29,6 +29,7 @@
 
 #define MAX_CMD_SLOT_CNT 32
 #define MAX_PORT_CNT     32
+
 
 typedef enum {
   FIS_TYPE_REG_H2D = 0x27,   // Register FIS - host to device
@@ -66,6 +67,9 @@ typedef struct {
   uint8_t featureh;          // Feature register, 15:8
 
   // DWORD 3
+  uint8_t countl;
+  uint8_t counth;  
+
   uint16_t count;            // Count register
   uint8_t icc;               // Isochronous command completion
   uint8_t control;           // Control register
@@ -216,7 +220,9 @@ typedef struct {
 /* physical region descriptor table entry */
 typedef struct {
   // DW0 & DW1
-  uint64_t dba;              // Data base address
+   uint64_t dba;              // Data base address
+  // uint32_t	dba;		// Data base address
+  // uint32_t	dbau;		// Data base address upper 32 bits
   // DW2
   uint32_t rsv0;             // Reserved
   // DW3
@@ -258,6 +264,7 @@ typedef struct {
 
   // DW2, 3
   uint64_t ctba;             // Command table descriptor base address
+  //uint32_t ctbau;          // Command table descriptor base address upper 32 bits
 
   // DW4 - 7
   uint32_t rsv1[4];          // Reserved
@@ -292,6 +299,7 @@ typedef struct {
 
 typedef volatile struct {
   uint64_t clb;              // 0x00, command list base address, 1K-byte aligned
+  //uint32_t clbu;
   uint64_t fb;               // 0x08, FIS base address, 256-byte aligned
   uint32_t is_rwc;           // 0x10, interrupt status
   uint32_t ie;               // 0x14, interrupt enable

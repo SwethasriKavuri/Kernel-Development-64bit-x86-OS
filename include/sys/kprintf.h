@@ -2,5 +2,7 @@
 #define __KPRINTF_H
 
 void kprintf(const char *fmt, ...);
-
+void backspace();
+void tab();
+void nextline();
 #endif
