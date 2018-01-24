@@ -5,4 +5,6 @@ void kprintf(const char *fmt, ...);
 void backspace();
 void tab();
 void nextline();
+void clrscr();
+
 #endif

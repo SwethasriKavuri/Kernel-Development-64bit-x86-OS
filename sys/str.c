@@ -1,5 +1,5 @@
 #include<sys/defs.h>
-
+/*
 char * strstr(char* str, char* substr)
 {
 	while(*str)
@@ -79,4 +79,4 @@ void *memcpy(void *dest, const void *src, uint64_t n)
         while(n--)
             *pd++ = *ps++;
     return dest;
-}
+}*/

@@ -24,15 +24,18 @@ char stack[4096];
 static size_t num_pages_base;   // Number of pages in base memory
 static size_t num_pages_upper;  
 int max_mem;
-void testContextSwitch()
+
+char stack[INITIAL_STACK_SIZE];
+
+/*void testContextSwitch()
 
 {
-    kprintf("Switching to Task2\n");  
+    kprintf("Switching to Sbush!\n");  
     initTasking();
     changeTask();
-   // kprintf("Returned to Task1\n");
+    kprintf("Returned to Kernel\n");
 }
-
+*/
 void kmemory()
 {
 
@@ -74,9 +77,30 @@ void start(uint32_t *modulep, void *physbase, void *physfree)
 		
 }
 
+clrscr();
 memory_init(max_mem, (uint64_t)physfree, (uint64_t)physbase);
+tarfs_init();
 
-testContextSwitch();
+
+//readfile check- comment next set of lines after checking
+//uint64_t faddr = 0xFFFFFFFF8020D560;
+//char fbuf[1024];
+//readfile(faddr,1024,(uint64_t)fbuf);
+
+
+
+
+//uint64_t file_add = tarfs_open_file("bin/hello/hello.c");
+//char * buf=(char *)page_alloc();
+//int fsize = tarfs_read_file(file_add,10, buf);
+//kprintf("FileContent:%s,%d",buf,fsize);
+init_process_map();
+idle_process();
+//testContextSwitch(); 
+
+struct task_struct *process = create_process("bin/sbush");
+//struct task_struct *process = create_process("bin/cat");
+init_process((uint64_t *)stack,process);
 
 //init_process_map();
 
@@ -88,7 +112,7 @@ testContextSwitch();
 kprintf("physfree %p\n", (uint64_t)physfree);
 kprintf("physbase %p\n", (int64_t)physbase);
 kprintf("tarfs in [%p:%p]\n", &_binary_tarfs_start, &_binary_tarfs_end);
-
+//clrscr();
 }
 
 void boot(void)
@@ -107,10 +131,10 @@ void boot(void)
   );
   init_gdt(); 
   idt_install();
-
+//  schedule();
 /*testing*/
-	char* str = "Himalaya";
-                 syscall_3((uint64_t)1,(uint64_t)1 ,(uint64_t) str,(uint64_t)6);	  
+	//char* str = "Himalaya";
+          //       syscall_3((uint64_t)1,(uint64_t)1 ,(uint64_t) str,(uint64_t)6);	  
 //syscall_init();  
   //setting MSR value
  // pci_probe();
@@ -129,5 +153,4 @@ void boot(void)
   */
   while(1);__asm__ volatile ("hlt");
 }
-
 

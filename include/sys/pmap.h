@@ -36,13 +36,14 @@ struct PT {
 
 void memory_init(int max_mem, uint64_t physfree, uint64_t physbase);
 void page_init(int num_pages);
+uint64_t get_address(uint64_t* entry);
 uint64_t page_alloc();
 void page_free(struct Page *page);
 void page_table_alloc();
 void map_process(uint64_t vaddr, uint64_t paddr);
 void map_virt_phys(uint64_t vaddr, uint64_t paddr);
 void setup_child_pagetable(uint64_t child_PML4);
-
+uint64_t address_physical(uint64_t vaddr);
 uint64_t getPML4_index(uint64_t vaddr);
 uint64_t getPDPT_index(uint64_t vaddr);
 uint64_t getPDT_index(uint64_t vaddr);

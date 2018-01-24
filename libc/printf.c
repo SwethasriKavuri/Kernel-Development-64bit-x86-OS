@@ -1,148 +1,10 @@
-#include <sys/kprintf.h>
-#include  <stdarg.h>
-#include <sys/defs.h>
+#include <stdio.h>
+#include <string.h>
+#include <stdarg.h>
+#include <stdlib.h>
 
-#define KERNBASE 0xffffffff80000000
 char asceding_hex_array[16] = "0123456789ABCDEF";
 char final_value_to_print[2048];
-//static char* vga_start_address =(char*) 0xb8000;
-//static char* vga_address_pointer = (char*)0xb8000;
-
-//changes made by Banani
-static char* vga_start_address = (char *)0xFFFFFFFF800B8000;
-static char* vga_address_pointer = (char *)0xFFFFFFFF800B8000;
-
-int number_of_rows = 25;
-int number_of_columns =80;
-uint64_t  get_vga_address()
-{
-return  (uint64_t)vga_address_pointer;
-}
-
-void set_vga_address(uint64_t new_pointer_address)
-{
-vga_address_pointer = (char*)new_pointer_address; 
-}
- 
-int current_row_number()
-{
-int row_number = (vga_address_pointer-vga_start_address)/160;
-return row_number;
-}
-
-int current_column_no()
-{
-	int col =(((vga_address_pointer - vga_start_address)/2)%80);
-	return col;
-}
-
-void character_print_position(int row_number,int column_number)
-{
-uint64_t address_to_print = (uint64_t)vga_start_address+(row_number*0xA0 + column_number*2);
-set_vga_address(address_to_print);
-}
-void nextline()
-{
-        int linenumber = current_row_number() + 1;
-        character_print_position(linenumber,0);
-
-}
-
-void clrscr() {
-        char *v_ptr = vga_start_address;
-        int count =0;
-        while (count < (80*24*2)){
-        *(v_ptr+count) = ' ';
-        count= count+2;
-        }
-        vga_address_pointer = v_ptr;
-
-}
-
-void tab()
-{
-
-	set_vga_address(get_vga_address()+8);
-
-}
-
-
-void backspace(){
-	if((uint64_t)current_column_no() <= 8){
-		return;
-	}
-		
-	if (get_vga_address() >= (uint64_t)vga_start_address) 	
-	{	
-		set_vga_address(get_vga_address()-2);
-                char ch = ' '; 
-		*vga_address_pointer = ch;
-		//vga_address_pointer = vga_address_pointer-2;
-		set_vga_address(get_vga_address());	
-	}
-
-}
-
-
-void escape_sequence(const char *escape_character)
-{
-        if (*escape_character == '\n' )
-        {
-		nextline();
-               
-        }  
-        else if (*escape_character == '\t')
-	{
-	       tab();
-	
-	} 
-	
-}
-
-int  strlenn(const char* string)
-{
-
-        int len = 0;
-
-        while(*string++)
-                len++;
-
-        return len;
-
-}
-
-
-char* strrev(char* str){
-
-    int i;
-    int len = strlenn(str) -1;
-    for(i=0;i<strlenn(str)/2;i++)
-        {
-         str[i]+=str[len];
-         str[len]=str[i]-str[len];
-         str[i]=str[i]-str[len--];
-        }
-
-    return str;
-}
-
-
-
-int console_output(char *final_value_to_print,int curr_pos)
-{
-int length =0;
-while((*final_value_to_print)&&(length<curr_pos))
-{
-*vga_address_pointer = *final_value_to_print;
-
-final_value_to_print = final_value_to_print+1;
-
-vga_address_pointer= vga_address_pointer+2;
-
-length++;
-}
-return 0;
-}
 
 int convert_hex_to_string(char *final_value_to_print, unsigned long hex_to_convert, int curr_pos)
 {
@@ -261,7 +123,7 @@ int convert_int_to_string(char *final_value_to_print, int int_to_convert, int cu
 
 int convert_string_to_string(char *final_value_to_print, char *string_to_append, int curr_pos){
 
-    int len = strlenn(string_to_append) ;
+    int len = strlen(string_to_append) ;
     int i = 0;
 
     while(i < len){
@@ -306,52 +168,43 @@ int vprintfs(va_list variables, const char *input_string)
                     break;
 
                 case 'x':
-               curr_pos = convert_hex_to_string(final_value_to_print, va_arg(variables, unsigned long), curr_pos);
-                             break;
+                    curr_pos = convert_hex_to_string(final_value_to_print, va_arg(variables, unsigned long), curr_pos);
+                    break;
 
 
                 case 'p':
-            curr_pos = convert_pointer_to_string(final_value_to_print, va_arg(variables, unsigned long), curr_pos);
-                 break;
-
-                default:
-//                final_value_to_print[curr_pos] = *input_string;
-//                 curr_pos += 1;
+                    curr_pos = convert_pointer_to_string(final_value_to_print, va_arg(variables, unsigned long), curr_pos);
                     break;
 
+                default:
+//                  final_value_to_print[curr_pos] = *input_string;
+//                  curr_pos += 1;
+                    break;
             }
 
         }
-        else if ( *input_string == '\n')
-        {
-        nextline();   
-            
-        }
-       else if(*input_string =='\t')
-       {
-        tab();  
-       }
 
        else
 
          {
-         final_value_to_print[curr_pos] = *input_string;
-                 curr_pos += 1;
+                final_value_to_print[curr_pos] = *input_string;
+                curr_pos += 1;
 
           } 
     }
 
-final_value_to_print[curr_pos] = '\0'; // current position always points to where the char ends. hence termination with\0
-
-return console_output(final_value_to_print,strlenn(final_value_to_print));
+    final_value_to_print[curr_pos] = '\0'; // current position always points to where the char ends. hence termination with\0
+    write(1, final_value_to_print, strlen(final_value_to_print));
+    return 0;
 }
 
 
-void kprintf(const char *fmt, ...)
+int printf(const char *fmt, ...)
 {
 
 va_list variables;
 va_start(variables, fmt);
 vprintfs(variables, fmt);
-
+ 
+return 0;
 }

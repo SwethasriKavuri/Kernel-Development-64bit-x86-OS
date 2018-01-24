@@ -5,6 +5,7 @@
 
 #include <sys/ahci.h>
 #include <sys/kprintf.h>
+#include <sys/string.h>
 #define PAGE_TRANS_READ_WRITE 0x2ULL
 #define PAGE_TRANS_USER_SUPERVISOR 0x4ULL
 
@@ -24,12 +25,12 @@
 
 
 
-void* memset(void *str,int val,uint64_t size){
+/*void* memset(void *str,int val,uint64_t size){
     unsigned char* ptr = str;
     while(size--)
         *ptr++ = (unsigned char) val;
     return str;
-}
+}*/
 
 // Find a free command list slot
 int find_cmdslot(hba_port_t *port)

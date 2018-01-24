@@ -1,188 +1,359 @@
-#include "sys/task.h"
-#include "sys/kprintf.h"
-#include "sys/pmap.h"
-#include "sys/gdt.h"
-#include <sys/syscall.h>
-#include <sys/str.h>
-#include <sys/idt.h>
-#include <sys/irq.h>
+#include <sys/task.h>
 #include <sys/elf64.h>
+#include<sys/pmap.h>
 #include <sys/vmmu.h>
+#include <sys/gdt.h>
+#include<sys/string.h>
+#include<sys/kprintf.h>
+#define NUM_REGISTERS_SAVED 15
+#define TRAP_SIZE           5
+#define TSS_OFFSET          1
+#define STACK_OFFSET        KERNEL_STACK_SIZE - NUM_REGISTERS_SAVED - TRAP_SIZE - TSS_OFFSET
+extern void handler_syscall();
 
-static struct task_struct *runningTask;
-static struct task_struct mainTask;
-static struct task_struct otherTask;
-struct task_struct *current;
-//static uint64_t u_rsp;
- int processid[50];
-static __inline uint64_t syscall_3(uint64_t n, uint64_t a1, uint64_t a2, uint64_t a3) 
+struct task_struct *currentTask;
+
+struct task_struct *next_process;
+struct task_struct * from ,*to;
+struct task_struct *runningTask; //global
+
+int processid[50];
+
+char *print_state(int task_state)
+
 {
-    
-    uint64_t a;
-    __asm__ volatile("int $0x80" : "=a" (a) : "0" (n), "D" ((uint64_t)a1), "S" ((uint64_t)a2), "b"((uint64_t)a3));
-    return a;
 
+        switch (task_state)  {
+
+        case END:
+                return "END          ";
+        case RUNNING:
+                return "RUNNING        ";
+        case ZOMBIE:
+                return "ZOMBIE         ";
+        case WAITING:
+                return "WAITING        ";
+        default:
+                return "UNKNOWN        ";
+        }
+        return NULL;
 
 }
 
-void switch_to_ring3();
+void task_changedir(uint64_t path)
 
-
-void init_process_map()
-{
-	int id = 0;
-	for(; id < 50; id++)
-		processid[id] = 0;
-}
-
-
-
-int procid()
-{
-         int i=0;
-          for(;i<50;i++) {
-		if(processid[i] == 0) {
-			processid[i] = 1;
-			return i;
-		}
-	}
-	return -1;
-}
-
-
-
-/*
-static void userMain()
 {
 
-char* str = "abcder";
-uint64_t * ptr = (uint64_t *)u_rsp;
-*ptr = (uint64_t) userMain;
-syscall_3((uint64_t)1,(uint64_t)1 ,(uint64_t) str,(uint64_t) strlength(str));
-kprintf("Hello User world!,%p",&userMain);
-while(1);
-
-}
-*/
-
-// COW (Copy on Write)
-void* copy_on_write(struct task_struct *parent)
-{
-	struct task_struct *child = (struct task_struct *)kmalloc(sizeof(struct task_struct));
-
-	child->task_state = READY;
-	child->pid = procid();
-	child->ppid = parent->pid ;
-        child->wait_on_child_pid = -1;
-	parent->num_child += 1;
-	
-        strcpy(child->task_name,current->task_name);
-
-	/* set child page tables */
-	child->regs.cr3 = (uint64_t)page_alloc();
-
-	setup_child_pagetable(child->regs.cr3);
-
-	/* set the child CR3 to allocate memory to its structures*/
-	set_CR3((struct PML4 *)child->regs.cr3);
-
-	/* copy vmas */
-	struct vm_area_struct *parent_vma = parent->vma_struct;
-	struct vm_area_struct *child_vma = NULL;
-	int first = 0;
-
-	while(parent_vma) {
-
-		if(child_vma == NULL)
-			first = 1;
-
-		child_vma = (struct vm_area_struct *)kmalloc(sizeof(struct vm_area_struct));
-
-		memcpy(child_vma, parent_vma, sizeof(struct vm_area_struct));
-
-		if(parent_vma->file!=NULL){
-			child_vma->file = kmalloc(sizeof(struct file_struct));
-			memcpy(child_vma->file,parent_vma->file,sizeof(struct file_struct));
-		}
-
-		if(first) {
-			child->vma_struct = child_vma;
-			first = 0;
-		}
-
-		if(child_vma->next)
-			child_vma = child_vma->next;
-		parent_vma = parent_vma->next;
-	}
-
-	/* if no vma was there in parent , mark the
-	 * child memory map as null and return
-	 */
-	if(!child_vma) {
-		child->vma_struct = NULL;
-		return (void *)child;
-	}		
-
-	child_vma->next = NULL;
-
-	return (void *)child;
+	strcpy(currentTask->cur_dir,(char *)path);
 
 }
 
+int sys_process_status()
+
+{
+
+ kprintf("\t-------------Process List--------\n");
+ int count =1;
+ struct task_struct *head = currentTask;
+ while(head!=NULL){
+   kprintf("\n%d |  %d | %d | %s  | %s",count++,head->pid,head->ppid,head->task_name,print_state(head->task_state));//,temp->pname );
+   head = head->next;
+}
+        return 0;
+}
 
 static void otherMain() 
 {
-      kprintf("Hello multitasking world!"); // Not implemented here...
-//    changeTask();
-//      initialise_syscalls();  
-      struct task_struct *user_proc = create_user_process("bin/sbush"); 
-      switch_to_ring3(user_proc);
-      kprintf("Back to Hello multitasking world!");
-      while(1);
 
-}
- 
+while(1)
 
-void initTasking() 
 {
 
-   __asm__ __volatile__("movq %%cr3, %%rax; movq %%rax, %0;":"=g"(mainTask.regs.cr3)::"memory"); 
-   __asm__ __volatile__("pushfq; movq (%%rsp), %%rax; movq %%rax, %0; popfq;":"=g"(mainTask.regs.rflags)::"memory");
-    createTask(&otherTask, otherMain,mainTask.regs.rflags, (uint64_t*)mainTask.regs.cr3);
-    mainTask.next = &otherTask;
-    otherTask.next = &mainTask; 
-    runningTask = &mainTask;
+	kprintf("Idle Process!\n");
+	schedule();
+
+}
+
+}
+
+
+
+uint64_t kill_process(uint64_t pid)
+{
+        //implement kill here
+        struct task_struct *kill_Task;
+        kill_Task = currentTask;
+        while(kill_Task != NULL)
+        {
+                if(kill_Task->pid==pid)
+                        break;
+                kill_Task=kill_Task->next;
+        }
+        if(kill_Task!=NULL)
+         {
+           kill_Task->task_state = END;
+           kprintf("Killed: %d\n",kill_Task->pid);
+           sys_process_status();
+           schedule();
+        }
+        return 0;
+}
+
+struct task_struct* getTask(uint64_t pid)
+{
+        struct task_struct *pidTask;
+       
+        pidTask = currentTask;
+       
+        while(pidTask != NULL)
+         {
+       
+           if(pidTask->pid==pid)
+           
+           return pidTask;
+           
+           pidTask=pidTask->next;       
+        
+        }
+      
+return NULL;
+
+}
+
+int wait_process(uint64_t childpid,uint64_t status,uint64_t options)
+{
+ 
+     struct task_struct *waitTask = currentTask;
+     
+    while(waitTask != NULL)
+        {
+                if(strlen(waitTask->task_name)!=0 && waitTask->ppid == (int)childpid )
+                {
+                        if(waitTask->task_state==RUNNING)
+                        {
+                                struct task_struct * parentTask = getTask(childpid);
+                                parentTask->task_state = WAITING;
+                                schedule();
+                        }
+                }
+                waitTask = waitTask->next;
+        }
+   
+     return 0;
+}
+
+void init_process_map()
+{
+        int id = 1;
+        for(; id < 50; id++)
+                processid[id] = 0;
+}
+
+int procid()
+{
+         int i=1;
+          for(;i<50;i++) {
+                if(processid[i] == 0) {
+                        processid[i] = 1;
+                        return i;
+                }
+        }
+        return -1;
+}
+
+void schedule()
+
+{
+
+    struct task_struct * nextTask = returnWaitTask();
+
+    if(nextTask != NULL)
+    { 
+	from=runningTask;
+	to=nextTask;
+    	switchTask();
+    }
+}
+
+struct task_struct *create_process(char *binary)
+
+{	        
+        struct task_struct *process = (struct task_struct *)kmalloc(sizeof(struct task_struct));
+
+        process->regs.cr3 = (uint64_t)set_user_AddrSpace();
+
+        struct PML4 *curr_CR3 = (struct PML4 *)get_CR3();
+
+        set_CR3((struct PML4 *)process->regs.cr3);
+
+        load_exe(process,binary);
+
+        process->kstack[511-5] = process->regs.rip;     //RIP
+        
+        process->kstack[511-4] = 0x2B ;                           //CS
+        
+        process->kstack[511-3] = 0x246;                           //EFlags
+        
+        process->kstack[511-2] = (uint64_t)process->stack;     //RSP
+        
+        process->kstack[511-1] = 0x23 ;                           //SS
+        
+        process->kernel_rsp = (uint64_t *)&process->kstack[511-5-15];
+
+        set_CR3((struct PML4 *)curr_CR3);
     
+        process->next = NULL;
+    
+        process->pid = procid();   
+        strcpy(process->task_name,binary);
+        strcpy(process->cur_dir,"bin/");
+
+       // addTask(process);
+	currentTask=process;
+        return process;
 }
- 
-void createTask(struct task_struct *task, void (*otherMainIP)(),uint64_t flags, uint64_t *pagedir) 
-{
-    task->regs.rax = 0;
-    task->regs.rbx = 0;
-    task->regs.rcx = 0;
-    task->regs.rdx = 0;
-    task->regs.rsi = 0;
-    task->regs.rdi = 0;
-    task->regs.rflags = flags;
-    task->regs.rip = (uint64_t) otherMainIP;
-    task->regs.cr3 = (uint64_t) pagedir;
-    task->regs.rsp = (page_alloc() +(uint64_t)0xFA0);
-    task->next = 0;
-    uint64_t * ptr = ( uint64_t *) (task->regs.rsp + 0x30);
-    * ptr = task->regs.rip;
-}
- 
-void switchTask(struct task_struct *from, struct task_struct *to)
+
+
+void* copy_on_write(struct task_struct *parent)
 
 {
+        struct task_struct *child = (struct task_struct *)kmalloc(sizeof(struct task_struct));
+
+//        child->task_state = READY;
+        child->pid = procid();
+        child->ppid = parent->pid ;
+        child->wait_on_child_pid = -1;
+        parent->num_child += 1;
+
+        strcpy(child->task_name,parent->task_name);
+    
+        strcpy(child->cur_dir,parent->cur_dir);    
+    
+        child->regs.cr3 = (uint64_t)page_alloc();
+
+        setup_child_pagetable(child->regs.cr3);
+
+        
+        set_CR3((struct PML4 *)child->regs.cr3);
+
+        
+        struct vm_area_struct *parent_vma = parent->vma_struct;
+        struct vm_area_struct *child_vma = NULL;
+        int first = 0;
+
+        while(parent_vma) {
+
+                if(child_vma == NULL)
+                        first = 1;
+
+                child_vma = (struct vm_area_struct *)kmalloc(sizeof(struct vm_area_struct));
+
+                memcpy(child_vma, parent_vma, sizeof(struct vm_area_struct));
+
+                if(parent_vma->file!=NULL){
+                        child_vma->file = kmalloc(sizeof(struct file_struct));
+                        memcpy(child_vma->file,parent_vma->file,sizeof(struct file_struct));
+                }
+
+                if(first) {
+                        child->vma_struct = child_vma;
+                        first = 0;
+                }
+
+                if(child_vma->next) 
+                        child_vma = child_vma->next;
+                parent_vma = parent_vma->next;
+        }
+
+        
+        if(!child_vma) {
+                child->vma_struct = NULL;
+                return (void *)child;
+        }
+
+        child_vma->next = NULL;
+
+        return (void *)child;
+                                   
+}
+
+
+
+void idle_process()
+{
+        
+        struct task_struct *idle_task = (struct task_struct *) kmalloc(sizeof(struct task_struct));
+        strcpy(idle_task->task_name,"Idle Process");
+        idle_task->pid = procid();
+        idle_task->ppid = 0;
+        idle_task->next = NULL;
+        idle_task->regs.cr3 = (uint64_t)get_CR3();
+        idle_task->kernel_rsp = (uint64_t *)idle_task->kstack[511];
+        idle_task->kstack[511-6]=(uint64_t) otherMain;
+        idle_task->task_state = WAITING;
+        currentTask = idle_task;
+
+}
+
+void init_process(uint64_t *stack, struct task_struct *newProc)
+//This is my switch to ring3 function
+
+{	
+        runningTask = newProc;
+  
+        runningTask->task_state = RUNNING;
+   
+	struct task_struct *process = newProc ;
+     
+        __asm __volatile("movq %0, %%cr3":: "a"(process->regs.cr3));
+
+        __asm__ __volatile__ ("movq %0, %%rsp;"::"r"(process->kernel_rsp));      	
+
+         set_tss_rsp((void *)&process->kstack[511]);
+       
+        __asm__ __volatile__("popq %r15");
+	__asm__ __volatile__("popq %r14");
+	__asm__ __volatile__("popq %r13");
+	__asm__ __volatile__("popq %r12");
+	__asm__ __volatile__("popq %r11");
+	__asm__ __volatile__("popq %r10");
+	__asm__ __volatile__("popq %r9");
+	__asm__ __volatile__("popq %r8");
+        __asm__ __volatile__("popq %rbp");
+	__asm__ __volatile__("popq %rdi");
+	__asm__ __volatile__("popq %rsi");
+	__asm__ __volatile__("popq %rdx");
+	__asm__ __volatile__("popq %rcx");
+	__asm__ __volatile__("popq %rbx");
+	__asm__ __volatile__("popq %rax");
+	__asm__ __volatile__("iretq");
+
+}
+
+
+void switchTask()
+{
+    __asm__ __volatile__("addq $8, %rsp");
+        runningTask = to;
+       
+        runningTask->task_state = RUNNING;
+        
+        if(from->task_state != END)
+        {
+           from->task_state = WAITING;
+        }
+
+
+    set_CR3((struct PML4 *)to->regs.cr3);
+
     __asm__ __volatile__("pushq %rax");
     __asm__ __volatile__("pushq %rbx");
     __asm__ __volatile__("pushq %rcx");
-    __asm__ __volatile__("pushq %rdx"); 
+    __asm__ __volatile__("pushq %rdx");
     __asm__ __volatile__("pushq %rsi");
     __asm__ __volatile__("pushq %rdi");
-    __asm__ __volatile__("movq %%rsp, %0":"=g"(from->regs.rsp)::"memory");
-    __asm__ __volatile__("movq %0, %%rsp"::"m"(to->regs.rsp));
+    __asm__ __volatile__("movq %%rsp, %0":"=g"(from->kernel_rsp)::"memory");
+    __asm__ __volatile__("movq %0, %%rsp"::"m"(to->kernel_rsp));
     __asm__ __volatile__("popq %rdi");
     __asm__ __volatile__("popq %rsi");
     __asm__ __volatile__("popq %rdx");
@@ -190,153 +361,239 @@ void switchTask(struct task_struct *from, struct task_struct *to)
     __asm__ __volatile__("popq %rbx");
     __asm__ __volatile__("popq %rax");
     __asm__ __volatile__("retq");
-  
+ 
 }
 
 
-void changeTask()
-
+uint64_t sys_fork() 
 {
-  struct task_struct *last = runningTask;
-    runningTask = runningTask->next;
-    switchTask(last, runningTask);
+
+		struct task_struct *parent_process = runningTask;
+
+		struct task_struct *child_process = (struct task_struct *)copy_on_write((struct task_struct*)parent_process);
+
+//		child_process->stack=(uint64_t*)USER_STACK_TOP-0x1000;            
+                
+                child_process->kernel_rsp = (uint64_t *)(&child_process->kstack[511-14-6]);
+
+		child_process->kstack[511-14] = (uint64_t)handler_syscall+0x13;
+                
+                child_process->kstack[511-13]=parent_process->kstack[511-15];
+
+                child_process->kstack[511-12]=parent_process->kstack[511-14];
+
+                child_process->kstack[511-11]=parent_process->kstack[511-13];
+
+                child_process->kstack[511-10]=parent_process->kstack[511-12];
+
+                child_process->kstack[511-9]=parent_process->kstack[511-11];
+
+                child_process->kstack[511-8]=parent_process->kstack[511-10];
+
+                child_process->kstack[511-7]=parent_process->kstack[511-9];
+
+                child_process->kstack[511-6] = 0; 
+                
+                child_process->kstack[511-5]=parent_process->kstack[511-7];
+
+                child_process->kstack[511-4] = parent_process->kstack[511-6];
+		
+                child_process->kstack[511-3] = parent_process->kstack[511-5];                           
+		
+                child_process->kstack[511-2] = parent_process->kstack[511-4];                           
+		
+                child_process->kstack[511-1] =  parent_process->kstack[508];                                                   
+		
+                child_process->kstack[511] = parent_process->kstack[511-2];                           
+
+                set_CR3((struct PML4 *)parent_process->regs.cr3);
+                
+                strcpy(child_process->cur_dir,parent_process->cur_dir);
+
+                set_tss_rsp((void *)&child_process->kernel_rsp);
+
+                next_process = child_process;
+		child_process->next=NULL;
+		addTask(child_process);
+		from = runningTask;to=child_process;
+		switchTask();
+		return child_process->pid;
+
 }
 
-void switch_to_ring3(struct task_struct *user_process)
+void addTask(struct task_struct *newTask)
+
 {
 
-user_process->task_state = RUNNING;
+    if(currentTask->next == NULL)
 
-//uint64_t funcadd = (uint64_t)userMain;
+    {
+       
+       currentTask->next = newTask;
+    
+    }
 
-uint64_t funcadd = user_process->regs.rip;
+    else
+    {
+        
+        struct task_struct *current_pointer = currentTask;
+        
+         while (1) 
+          {
 
-//uint64_t * rsp; 
+            if(current_pointer->next == NULL)
+            
+             {
+                current_pointer->next = newTask;
+                
+                break;
+             
+             }
+            
+             current_pointer = current_pointer->next;
+         }
+    }
+}
 
-//u_rsp = (page_alloc() +(uint64_t)0xFA0);
 
-__asm__ __volatile__("cli");
-__asm__ __volatile__("movq %%rsp,%0;":"=r"(user_process->kernel_rsp)::"memory");
+void moveToEnd(struct task_struct* task) 
+{
+    struct task_struct *task_list = currentTask;
 
-set_tss_rsp((void *)user_process->kernel_rsp);
+    while (task_list->next != NULL) 
 
-__asm__ __volatile__("movq %0,%%cr3;": : "r"(user_process->regs.cr3));
-__asm__ __volatile__("movq %0,%%rax;": : "r"(user_process->regs.rsp));
-__asm__ __volatile__("pushq $0x23");
-__asm__ __volatile__("pushq %rax");
-__asm__ __volatile__("pushfq");
-/*__asm__ __volatile__("popq %rax");
-__asm__ __volatile__("orq $0x200,%rax");
-__asm__ __volatile__("pushq %rax");
-*/
-__asm__ __volatile__("pushq $0x2B");
-__asm__ __volatile__("pushq %0"::"r"(funcadd):"memory");
-__asm__ __volatile__("sti");
-__asm__ __volatile__("iretq");
+    {
+        if (task_list->next == task)
+
+        task_list->next = task_list->next->next;
+
+        task_list = task_list->next;
+    }
+
+    task_list->next = task;
+    
+    task->next = NULL;
 
 }
 
-struct task_struct* create_user_process(char *filename)
+struct task_struct* returnWaitTask()
 {
-	struct task_struct *newProc = (struct task_struct *)kmalloc(sizeof(struct task_struct));
+        struct task_struct *nextTask = currentTask;
+        
+        while(nextTask != NULL)
+        
+         {
+               
+                if(nextTask->task_state == WAITING)
+                {
+                        moveToEnd(nextTask);
 
-	newProc->regs.cr3 = (uint64_t)set_user_AddrSpace();
+                        return nextTask;
+                }
+               
+                nextTask = nextTask->next;
+
+        }
+       
+         return NULL;
+}
+
+int sys_execve(char *filename, char **argv, char **envp)
+
+{     
+       //kprintf("Inside execve %s",filename);
+       uint64_t argc=0;
+
+//       char arguments[6][64];
 	
-        void *kStack = (void *)kmalloc(4096);
+       uint64_t index = 0;     
+	if(argv != NULL) {
+                while((char *)(argv+index) != NULL && strcmp((char *)(argv+index),"")!=0){
+               //         strcpy(args[argc],argv[k]);
+                        argc++;
+                        index+=8;
+                }
+        }/*
+       if(argv != NULL) 
 
-	newProc->init_kern = newProc->kernel_stack = ((uint64_t)kStack + 4096 - 8);        
+        {
+		while(argv[index] != NULL)
+                
+                {
+              		strcpy(arguments[argc],argv[index]);
+               		
+                        argc++;
+			
+                        index++;
+        	}
+	}*/
+          
+        runningTask->task_state = END;
+    
+        struct task_struct *binary = (struct task_struct *)kmalloc(sizeof(struct task_struct));	     
+
+        binary->pid = currentTask->pid;
+
+	binary->ppid = currentTask->ppid;      
+ 
+        strcpy(binary->cur_dir,"bin/");
+
+	strcpy(binary->task_name,filename);
+
+        binary->regs.cr3 = (uint64_t)set_user_AddrSpace();
 
         struct PML4 *curr_CR3 = (struct PML4 *)get_CR3();
 
-	set_CR3((struct PML4 *)newProc->regs.cr3);
+        set_CR3((struct PML4 *)binary->regs.cr3);
 
-	int error = load_exe(newProc,filename);
+        load_exe(binary,filename);
 
-	if(error)
-		return NULL;
+        binary->kstack[511-5] = binary->regs.rip;     //RIP
 
-	set_CR3((struct PML4 *)curr_CR3);
-	return newProc;
-}
+        binary->kstack[511-4] = 0x2B ;                           //CS
 
-int sys_fork()
- 
- {  
-kprintf("Sanjay Reddy\n");  
-  struct task_struct *temp, *parent = NULL;	
-  
-  struct task_struct *child = (struct task_struct *)copy_on_write((struct task_struct*)current);
-  
-  temp = current->next;
-  
-  current->next = child;
-  
-  child->next = temp;
-  
-  parent = current;
-  
-  void *kstack = (void *)kmalloc(4096);
-  
-  child->init_kern = child->kernel_stack = ((uint64_t)kstack + 4096 - 8);
-  
-  memcpy((void *)(child->init_kern - 0x1000 +8), (void *)(parent->init_kern - 0x1000 +8), 4096-8);
-  
-  volatile uint64_t stack_pos;   
+        binary->kstack[511-3] = 0x246;                           //EFlags
 
-  
-/*
-  for(int i=STACK_OFFSET; i<STACK_OFFSET+NUM_REGISTERS_SAVED+1; i++) 
-                  {
-			child->kstack[i]=parent>kstack[i+1];
-		  }
+        binary->kstack[511-1] = 0x23 ;                           //SS
 
-    child->kstack[KERNEL_STACK_SIZE-TSS_OFFSET-6] = 0;  // assigning rax of child to zero;
-    
-    child->kstack[KERNEL_STACK_SIZE-TSS_OFFSET-5] = parent->kstack[KERNEL_STACK_SIZE-TSS_OFFSET-5];                           // EIP
-    
-    child->kstack[KERNEL_STACK_SIZE-TSS_OFFSET-4] = parent->kstack[KERNEL_STACK_SIZE-TSS_OFFSET-4];                           // CS
-    
-    child->kstack[KERNEL_STACK_SIZE-TSS_OFFSET-3] = 0x200286;                           // EFLAGS - 0x200286
-    
-    child->kstack[KERNEL_STACK_SIZE-TSS_OFFSET-2] = parent->kstack[KERNEL_STACK_SIZE-TSS_OFFSET-2];                           // ESP
-    
-    child->kstack[KERNEL_STACK_SIZE-TSS_OFFSET-1] = parent->kstack[KERNEL_STACK_SIZE-TSS_OFFSET-1];                           // SS
+        binary->kernel_rsp = (uint64_t *)&binary->kstack[511-5-15];
+
+        uint64_t *stack = (uint64_t *)get_phy_addr(USER_STACK_TOP-0x1000);
+
+        uint64_t *ptr = (uint64_t *)((uint64_t)stack + 4096-16-64*argc); 
        
-    child->kernel_rsp = (uint64_t *)(&child->kstack[STACK_OFFSET])
-*/
-
-
-
-set_CR3((struct PML4 *)parent->regs.cr3);
-
-	__asm__ __volatile__(
-                "movq $2f, %0;"
-		"2:\t"
-                :"=g"(child->regs.rip)
-        );
-
-	__asm__ __volatile__(
-                "movq %%rsp, %0;"
-                :"=r"(stack_pos)
-        );
-
-	if(current == parent)       
+        if(argc>0)  
+        
         {
-		/* if parent is executing, set the child kernel stack
-		 * before leaving the ring 0
-		 */
-		child->kernel_stack = child->init_kern - (parent->init_kern - stack_pos);
-       		return child->pid;
-	}
-	
-        else 
        
-        {
-       		outb(0x20, 0x20);
-        	return 0;
-  	}
+        *ptr= argc;
+        
+        memcpy((ptr+1),(void *)argv,argc*64);
+        
+        }
+       
+        binary->stack = (uint64_t *)ptr;
 
-        return 0;
+        binary->kstack[511-2] = (uint64_t)binary->stack;        
+
+        set_CR3((struct PML4 *)curr_CR3);
+       
+        //current = binary;
+ 	
+        //init_process((uint64_t)0, binary);    
+	binary->next=NULL;
+
+	addTask(binary);//from=runningTask;to=binary;
+  
+      //  switchTask();
+      
+        init_process((uint64_t)0, binary);  
+
+        return -1;
+
 }
-
-
+void SYS_exit()
+{
+	runningTask->task_state=END;
+	schedule();
+}

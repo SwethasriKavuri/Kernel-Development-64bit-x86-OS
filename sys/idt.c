@@ -5,6 +5,10 @@
 #include <sys/kprintf.h>
 #include <sys/interrupt.h>
 #include <sys/syscall.h>
+#include <sys/pmap.h>
+#include <sys/vmmu.h>
+#include <sys/string.h>
+
 static struct idt_entry idt[256];
 static struct idt_ptr idtp;
 static unsigned char* v_ptr;
@@ -57,7 +61,7 @@ void idt_install(){
   PIC_remap();
   idt_set_gate(32, (uint64_t)handler_timer, 0x08, 0x8E);
   idt_set_gate(33, (uint64_t)handler_keyboard, 0x08, 0x8E);
-//  idt_set_gate(14, (uint64_t)handler_page_fault, 0x08, 0x8E); 
+  idt_set_gate(14, (uint64_t)handler_page_fault, 0x08, 0x8E); 
   idt_set_gate(128, (uint64_t) handler_syscall, 0x08, 0xEE);
     
   
@@ -98,12 +102,14 @@ void PIC_remap(){
 
 
 void register_interrupt_handler(registers_t *reg){
-	kprintf("\nregister_interrupt_handler");
+//	kprintf("\nregister_interrupt_handler");
 	syscall_handler(reg);
 	outb(0x20, 0x20);
 }
 
 
+
+/*
 void page_fault_handler(registers_t *reg){
 	uint64_t fault_addr;
  	uint64_t p_error = reg->err_code & PF_P;
@@ -119,6 +125,29 @@ void page_fault_handler(registers_t *reg){
 	//system call for user
 
 }
+*/
+
+
+void page_fault_handler(registers_t *reg)
+{
+//	kprintf("In Pg fault");
+        volatile uint64_t faultAddr;
+        __asm volatile("mov %%cr2, %0" : "=r" (faultAddr));
+         uint64_t pte_entry = address_physical(faultAddr);
+                if(pte_entry & PTE_COW) {
+                        uint64_t temp_vaddr = (uint64_t)kmalloc(4096);
+                        uint64_t paddr = address_physical(get_address(&temp_vaddr));
+                        faultAddr = ((faultAddr / 4096) * 4096);
+                        memcpy((void *)temp_vaddr, (void *)(faultAddr), 4096);
+                        map_process(faultAddr, paddr);
+                        pte_entry = (pte_entry & ~0xfff)| PTE_P | PTE_W | PTE_U;
+                        return;
+                }
+}
+
+
+
+
 
 /*static __inline uint64_t syscall_3(uint64_t n, uint64_t a1, uint64_t a2, uint64_t a3) {
 	uint64_t a; 

@@ -1,4 +1,4 @@
-#ifndef STR_H
+/*#ifndef STR_H
 #define STR_H
 
 char * strstr(char* str, char* substr);
@@ -14,3 +14,4 @@ char* strcpy(char *dest,char *src);
 void *memcpy(void *dest, const void *src, uint64_t n);
 
 #endif
+*/

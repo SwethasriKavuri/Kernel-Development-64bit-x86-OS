@@ -23,7 +23,7 @@ void load_cr3() {
 
 	uint64_t baseaddr = (uint64_t)cr3;
 	__asm volatile("movq %0, %%cr3":: "r"(baseaddr):"memory");	
-	kprintf("CR3 loaded");	
+//	kprintf("CR3 loaded");	
 //	kprintf("%x", page_alloc()->addr);
 }
 
@@ -403,18 +403,22 @@ void setup_child_pagetable(uint64_t child_PML4)
 	
 							struct PT *p_pt = (struct PT *)get_address(&pdt_entry);
 							int pt_indx = 0;
-							for(; pt_indx < 512; pt_indx++) {
-
-								uint64_t pt_entry = get_pt_entry(&p_pt, pt_indx);
-								if(pt_entry & PTE_P) {
-									uint64_t page = (uint64_t)get_address(&pt_entry);
-									pt_entry = page | PTE_P | PTE_U | PTE_COW;	
-
-                                    					c_pt->page_entry[pt_indx] = pt_entry;
-
-									pt_entry = page | (PTE_P | PTE_U | PTE_COW);
-									p_pt->page_entry[pt_indx] = pt_entry;	
+							for(; pt_indx < 512; pt_indx++) 
+                                                             {
+								
+                                                                 uint64_t pt_entry = get_pt_entry(&p_pt, pt_indx);
+								 
+                                                                      if(pt_entry & PTE_P) {
+									
+                                                                        uint64_t page = (uint64_t)get_address(&pt_entry);                                                                            
+								 	 pt_entry = page | PTE_P | PTE_U | PTE_COW;	                                                                   
+                                                                         c_pt->page_entry[pt_indx] = pt_entry; 
+									 pt_entry = page | (PTE_P | PTE_U | PTE_COW);
+									 p_pt->page_entry[pt_indx] = pt_entry;
+                                                                       	
+                                                                         //memcpy(c_pt->page_entry[pt_indx] ,p_pt->page_entry[pt_indx],sizeof(page));
 								}	
+							
 							}	
 						}		
 					}		 
@@ -422,10 +426,46 @@ void setup_child_pagetable(uint64_t child_PML4)
 			}	
 		}
 	}
+
 	c_pml4->page_entry[511] = p_pml4->page_entry[511];
 	c_pml4->page_entry[510] = p_pml4->page_entry[510];
 }
 //physical page management
+
+
+uint64_t address_physical(uint64_t vaddr)
+
+{
+        uint64_t        paddr = 0;
+        struct PDPT     *pdpt = NULL;
+        struct PDT      *pdt = NULL;
+        struct PT       *pt = NULL;
+
+        uint64_t pml4Index = getPML4_index((uint64_t)vaddr);
+        uint64_t pdptIndex = getPDPT_index((uint64_t)vaddr);
+        uint64_t pdtIndex = getPDT_index((uint64_t)vaddr);
+        uint64_t ptIndex = getPT_index((uint64_t)vaddr);
+
+        struct PML4 *pml4 = (struct PML4*) get_CR3();
+        uint64_t pml4_entry = pml4->page_entry[pml4Index];
+
+        if(pml4_entry & PTE_P)
+                pdpt = (struct PDPT *)get_address(&pml4_entry);
+
+        uint64_t pdpt_entry = get_pdpt_entry(&pdpt, pdptIndex);
+
+        if(pdpt_entry & PTE_P)
+                pdt = (struct PDT*)get_address(&pdpt_entry);
+
+        uint64_t pdt_entry = get_pdt_entry(&pdt, pdtIndex);
+        if(pdt_entry & PTE_P)
+                pt = (struct PT*)get_address(&pdt_entry);
+        if(pt != NULL)
+                paddr = get_pt_entry(&pt, ptIndex);
+
+        return paddr;
+
+}
 	
 
 /*page_alloc()
